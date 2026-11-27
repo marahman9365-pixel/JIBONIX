@@ -1,12 +1,13 @@
 (function () {
     const TASKS_MODAL_ID = 'jibonix-tasks-workspace';
+    let triggeredAlarms = new Set();
 
     function attachTasksTrigger() {
         const cards = document.querySelectorAll('div, button, a');
         cards.forEach((el) => {
             if (
                 el.innerText &&
-                (el.innerText.includes('কাজ ও রুটিন') || el.innerText.includes('Tasks')) &&
+                (el.innerText.includes('কাজ ও রুটিন') || el.innerText.includes('কাজ ও দৈনিক') || el.innerText.includes('Tasks')) &&
                 el.children.length > 0 &&
                 el.offsetHeight > 50 &&
                 el.offsetHeight < 220 &&
@@ -109,11 +110,55 @@
         }
     }
 
+    // অ্যালার্ম সাউন্ড জেনারেটর (Web Audio API)
+    function playAlarmBeep() {
+        try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            const ctx = new AudioCtx();
+            [0, 0.3, 0.6].forEach((delay) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, ctx.currentTime + delay);
+                gain.gain.setValueAtTime(0.3, ctx.currentTime + delay);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + delay + 0.22);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(ctx.currentTime + delay);
+                osc.stop(ctx.currentTime + delay + 0.22);
+            });
+        } catch (e) {}
+    }
+
+    // প্রতি ১৫ সেকেন্ডে অ্যালার্মের সময় চেক করা
+    function checkAlarms() {
+        const now = new Date();
+        const hh = String(now.getHours()).padStart(2, '0');
+        const mm = String(now.getMinutes()).padStart(2, '0');
+        const currentHHMM = `${hh}:${mm}`;
+        const todayKey = now.toDateString();
+
+        ['tasks', 'routines'].forEach((type) => {
+            const items = JSON.parse(localStorage.getItem(`jibonix_${type}`) || '[]');
+            items.forEach((item) => {
+                const uniqueKey = `${todayKey}_${item.id}_${currentHHMM}`;
+                if (!item.done && item.time === currentHHMM && !triggeredAlarms.has(uniqueKey)) {
+                    triggeredAlarms.add(uniqueKey);
+                    playAlarmBeep();
+                    if ('Notification' in window && Notification.permission === 'granted') {
+                        new Notification('⏰ JIBONIX অ্যালার্ম', { body: item.title });
+                    }
+                    setTimeout(() => {
+                        alert(`⏰ অ্যালার্ম (${formatTime12(item.time)}):\n${item.title}`);
+                    }, 200);
+                }
+            });
+        });
+    }
+
     function hideModalOnly() {
         const modal = document.getElementById(TASKS_MODAL_ID);
-        if (modal) {
-            modal.classList.add('hidden');
-        }
+        if (modal) modal.classList.add('hidden');
     }
 
     function closeTasksWorkspace() {
@@ -132,12 +177,15 @@
     });
 
     function openTasksWorkspace() {
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+
         let modal = document.getElementById(TASKS_MODAL_ID);
         if (!modal) {
             modal = document.createElement('div');
             modal.id = TASKS_MODAL_ID;
-            modal.className =
-                'fixed inset-0 z-50 bg-slate-50 flex flex-col overflow-hidden font-sans';
+            modal.className = 'fixed inset-0 z-50 bg-slate-50 flex flex-col overflow-hidden font-sans';
             modal.innerHTML = `
                 <div class="bg-indigo-700 text-white px-4 py-3.5 flex items-center justify-between shadow">
                     <div class="flex items-center gap-2.5">
@@ -145,8 +193,8 @@
                             ← ড্যাশবোর্ড
                         </button>
                         <div>
-                            <h2 class="font-bold text-base leading-tight">কাজ ও দৈনিক রুটিন</h2>
-                            <p class="text-[11px] text-indigo-200">Tasks, Routine & Reminders</p>
+                            <h2 class="font-bold text-base leading-tight">কাজ ও দৈনিক অ্যালার্ম</h2>
+                            <p class="text-[11px] text-indigo-200">Tasks & Routine Alarms</p>
                         </div>
                     </div>
                     <button id="reset-routine-btn" class="text-xs bg-white/15 px-2.5 py-1.5 rounded-lg hover:bg-white/25">
@@ -154,18 +202,18 @@
                     </button>
                 </div>
 
-                <div class="grid grid-cols-2 bg-white border-b border-slate-200 text-sm font-semibold">
-                    <button id="tab-tasks" class="py-3 text-indigo-700 border-b-2 border-indigo-700">
-                        দৈনন্দিন কাজ (Tasks)
+                <div class="grid grid-cols-2 bg-white border-b border-slate-200 text-xs sm:text-sm font-semibold">
+                    <button id="tab-tasks" class="py-3 text-indigo-700 border-b-2 border-indigo-700 px-1">
+                        দৈনন্দিন কাজ (Tasks) অ্যালার্ম
                     </button>
-                    <button id="tab-routine" class="py-3 text-slate-500">
-                        দৈনিক রুটিন (Routine)
+                    <button id="tab-routine" class="py-3 text-slate-500 px-1">
+                        দৈনিক রুটিন (Routine) অ্যালার্ম
                     </button>
                 </div>
 
                 <div class="p-4 bg-white border-b border-slate-200 space-y-2.5">
                     <div class="flex gap-2">
-                        <input id="task-title-input" type="text" placeholder="নতুন কাজ বা রুটিন লিখুন (যেমন: IELTS Writing প্র্যাকটিস)..."
+                        <input id="task-title-input" type="text" placeholder="কাজ বা রুটিনের নাম লিখুন (যেমন: IELTS Writing প্র্যাকটিস)..."
                             class="flex-1 border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-600" />
                     </div>
                     <div class="flex gap-2 items-center">
@@ -179,7 +227,7 @@
                         </select>
                         <button id="add-task-submit"
                             class="ml-auto bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow hover:bg-indigo-800">
-                            + যোগ করুন
+                            + অ্যালার্ম যোগ
                         </button>
                     </div>
                 </div>
@@ -203,24 +251,22 @@
     let activeTab = 'tasks';
 
     function bindWorkspaceEvents() {
-        document.getElementById('close-tasks-btn').onclick = () => {
-            closeTasksWorkspace();
-        };
+        document.getElementById('close-tasks-btn').onclick = () => closeTasksWorkspace();
 
         const tabTasks = document.getElementById('tab-tasks');
         const tabRoutine = document.getElementById('tab-routine');
 
         tabTasks.onclick = () => {
             activeTab = 'tasks';
-            tabTasks.className = 'py-3 text-indigo-700 border-b-2 border-indigo-700';
-            tabRoutine.className = 'py-3 text-slate-500';
+            tabTasks.className = 'py-3 text-indigo-700 border-b-2 border-indigo-700 px-1';
+            tabRoutine.className = 'py-3 text-slate-500 px-1';
             renderActiveTab();
         };
 
         tabRoutine.onclick = () => {
             activeTab = 'routines';
-            tabRoutine.className = 'py-3 text-indigo-700 border-b-2 border-indigo-700';
-            tabTasks.className = 'py-3 text-slate-500';
+            tabRoutine.className = 'py-3 text-indigo-700 border-b-2 border-indigo-700 px-1';
+            tabTasks.className = 'py-3 text-slate-500 px-1';
             renderActiveTab();
         };
 
@@ -241,6 +287,7 @@
 
             titleEl.value = '';
             timeEl.value = '';
+            playAlarmBeep();
             await saveItem(activeTab, newItem);
             renderActiveTab();
         };
@@ -252,8 +299,9 @@
                     await toggleItem('routines', item.id, true);
                 }
             }
+            triggeredAlarms.clear();
             if (activeTab === 'routines') renderActiveTab();
-            alert('আজকের রুটিন নতুন করে শুরু করার জন্য রিসেট করা হয়েছে!');
+            alert('আজকের রুটিন অ্যালার্ম নতুন করে শুরু করার জন্য রিসেট করা হয়েছে!');
         };
     }
 
@@ -264,8 +312,8 @@
         if (!items.length) {
             container.innerHTML = `
                 <div class="text-center py-12 bg-white rounded-2xl border border-dashed border-slate-300">
-                    <p class="text-slate-500 text-sm font-medium">এখনো কোনো ${activeTab === 'tasks' ? 'কাজ' : 'রুটিন'} যোগ করা হয়নি</p>
-                    <p class="text-xs text-slate-400 mt-1">উপরের বক্সে লিখে "+ যোগ করুন" চাপুন</p>
+                    <p class="text-slate-500 text-sm font-medium">এখনো কোনো ${activeTab === 'tasks' ? 'কাজের অ্যালার্ম' : 'রুটিন অ্যালার্ম'} যোগ করা হয়নি</p>
+                    <p class="text-xs text-slate-400 mt-1">উপরের বক্সে নাম ও সময় দিয়ে "+ অ্যালার্ম যোগ" চাপুন</p>
                 </div>`;
             return;
         }
@@ -330,4 +378,5 @@
         setTimeout(attachTasksTrigger, 600);
     });
     setInterval(attachTasksTrigger, 1500);
+    setInterval(checkAlarms, 15000);
 })();
